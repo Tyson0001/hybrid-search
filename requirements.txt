@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+sentence-transformers
+faiss-cpu
+elasticsearch
+neo4j
+numpy
+pandas
+scikit-learn

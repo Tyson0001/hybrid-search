@@ -1,0 +1,7 @@
+[
+  {"id": 0, "text": "Python is used for backend development"},
+  {"id": 1, "text": "C++ is used for system programming"},
+  {"id": 2, "text": "FastAPI is a Python web framework"},
+  {"id": 3, "text": "Machine learning uses neural networks"},
+  {"id": 4, "text": "Databases store structured information"}
+]

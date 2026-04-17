@@ -1,0 +1,12 @@
+venv/
+# 🔴 Ignore heavy files
+elasticsearch-*
+*.tar.gz
+
+# 🔴 Python
+venv/
+__pycache__/
+*.pyc
+
+# 🔴 OS
+.DS_Store
