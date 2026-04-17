@@ -3,18 +3,20 @@ from fastapi.responses import HTMLResponse
 
 from app.retrieval import dense_search, bm25_search, rrf, docs
 from app.rerank import rerank
-from app.utils import expand_query
 
 app = FastAPI()
 
-
+# -------------------------------
 # 🔹 Home Page
+# -------------------------------
 @app.get("/", response_class=HTMLResponse)
 def home():
     return """
     <html>
     <body>
-        <h1>🔍 Hybrid Search System (Profiles)</h1>
+        <h1>🔍 Smart Hybrid Search System</h1>
+        <p>Search profiles using semantic + keyword + hybrid ranking</p>
+
         <form action="/search">
             <input type="text" name="q" placeholder="Enter query (e.g. python developer)">
             <button type="submit">Search</button>
@@ -23,26 +25,21 @@ def home():
     </html>
     """
 
-
+# -------------------------------
 # 🔹 Search Page
+# -------------------------------
 @app.get("/search", response_class=HTMLResponse)
 def search(q: str):
 
-    # 🔹 Query Expansion
-    queries = expand_query(q)
+    # Step 1: Retrieval
+    bm25 = bm25_search(q)
+    dense = dense_search(q)
 
-    bm25_all = []
-    dense_all = []
+    # Step 2: Fusion
+    fused = rrf(bm25, dense)
 
-    for query in queries:
-        bm25_all += bm25_search(query)
-        dense_all += dense_search(query)
-
-    # 🔹 Hybrid Fusion
-    fused = rrf(bm25_all, dense_all)
-
-    # 🔹 Re-ranking
-    ranked = rerank(q, fused[:10])
+    # Step 3: Rerank (IMPORTANT CHANGE: increased candidates)
+    ranked = rerank(q, fused[:30])
 
     results_html = ""
 
@@ -51,25 +48,23 @@ def search(q: str):
         doc = docs[i]
 
         text = doc.get("text", "")
-        preview = text[:150] + "..." if len(text) > 200 else text
+        preview = text[:250] + "..." if len(text) > 250 else text
 
-        # 🔹 Explanation
-        explanation = []
-
-        if q.lower() in text.lower():
-            explanation.append("✔ Keyword match")
-
-        if score > 0.5:
-            explanation.append("✔ Strong semantic similarity")
-
-        explanation.append("✔ Hybrid ranking (BM25 + Semantic + RRF)")
+        # 🔹 Explainability
+        explanation = f"""
+        <ul>
+            <li>Matched keywords from query</li>
+            <li>Semantic similarity using embeddings</li>
+            <li>Hybrid ranking (BM25 + Dense + RRF)</li>
+        </ul>
+        """
 
         results_html += f"""
-        <div style='margin:15px;padding:15px;border:1px solid black;border-radius:8px'>
+        <div style='margin:15px;padding:15px;border:1px solid black;border-radius:10px'>
             <p><b>Profile:</b> {preview}</p>
             <p><b>Score:</b> {round(score,3)}</p>
-            <p><b>Explanation:</b> {' | '.join(explanation)}</p>
-            <p>🔗 Connected in Knowledge Graph</p>
+            <p><b>Why this result?</b></p>
+            {explanation}
         </div>
         """
 
@@ -77,7 +72,7 @@ def search(q: str):
     <html>
     <body>
         <h2>Results for: {q}</h2>
-        <p>Hybrid Search (BM25 + Semantic + RRF)</p>
+        <p>Hybrid Search (TF-IDF + Semantic + RRF + Reranking)</p>
 
         {results_html}
 

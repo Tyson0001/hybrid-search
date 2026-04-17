@@ -1,64 +1,98 @@
+import pandas as pd
+import numpy as np
 from sentence_transformers import SentenceTransformer
 import faiss
-import numpy as np
-import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 
-from app.graph import add_profile
-
-# 🔹 Load Model
-model = SentenceTransformer('all-MiniLM-L6-v2')
-
-# 🔹 Load Dataset
+# -------------------------------
+# 🔹 Load Dataset (dynamic schema)
+# -------------------------------
 df = pd.read_csv("data/profiles.csv")
 df = df.fillna("")
 
-# 🔹 Convert to docs (structured + text field)
+# Combine all columns into one text field
+df["text"] = df.astype(str).agg(" ".join, axis=1)
+
 docs = df.to_dict(orient="records")
+texts = df["text"].tolist()
 
-for doc in docs:
-    doc["text"] = " ".join(str(v) for v in doc.values())
+# -------------------------------
+# 🔹 TF-IDF (Lexical Search)
+# -------------------------------
+vectorizer = TfidfVectorizer(
+    ngram_range=(1, 2),
+    stop_words="english"
+)
 
-# 🔹 Text list for models
-texts = [doc["text"] for doc in docs]
-
-# 🔹 Dense Embeddings (FAISS)
-embeddings = model.encode(texts)
-
-index = faiss.IndexFlatL2(embeddings.shape[1])
-index.add(np.array(embeddings))
-
-# 🔹 TF-IDF (BM25 alternative)
-vectorizer = TfidfVectorizer()
 tfidf_matrix = vectorizer.fit_transform(texts)
 
-# 🔹 Knowledge Graph (limit for speed)
-for doc in docs[:50]:
-    add_profile(doc["text"])
+# -------------------------------
+# 🔹 Sentence-BERT (Semantic Search)
+# -------------------------------
+model = SentenceTransformer("all-MiniLM-L6-v2")
 
+embeddings = model.encode(texts, show_progress_bar=True)
 
-# 🔹 Dense Search
-def dense_search(query):
-    q_emb = model.encode([query])
-    D, I = index.search(q_emb, 5)
-    return list(I[0])
+dimension = embeddings.shape[1]
+index = faiss.IndexFlatL2(dimension)
+index.add(np.array(embeddings))
 
+# -------------------------------
+# 🔹 Query Expansion (Intent Understanding)
+# -------------------------------
+def expand_query(q):
+    q = q.lower()
 
-# 🔹 Lexical Search (TF-IDF)
+    if "data analyst" in q:
+        return [q, "data analysis", "data science", "sql analytics"]
+
+    if "python developer" in q:
+        return [q, "backend developer", "software engineer python"]
+
+    if "machine learning" in q:
+        return [q, "ml engineer", "deep learning", "ai engineer"]
+
+    return [q]
+
+# -------------------------------
+# 🔹 BM25 / TF-IDF Search
+# -------------------------------
 def bm25_search(query):
-    q_vec = vectorizer.transform([query])
-    scores = (tfidf_matrix @ q_vec.T).toarray().ravel()
-    return list(np.argsort(scores)[::-1][:5])
+    queries = expand_query(query)
 
+    scores = np.zeros(len(texts))
 
-# 🔹 Hybrid Fusion (RRF)
+    for q in queries:
+        q_vec = vectorizer.transform([q])
+        scores += (tfidf_matrix @ q_vec.T).toarray().flatten()
+
+    return np.argsort(scores)[::-1]
+
+# -------------------------------
+# 🔹 Dense Search (FAISS)
+# -------------------------------
+def dense_search(query):
+    queries = expand_query(query)
+
+    scores = np.zeros(len(texts))
+
+    for q in queries:
+        q_vec = model.encode([q])
+        D, I = index.search(q_vec, len(texts))
+        scores[I[0]] += D[0]
+
+    return np.argsort(scores)
+
+# -------------------------------
+# 🔹 RRF Fusion
+# -------------------------------
 def rrf(bm25, dense, k=60):
     scores = {}
 
-    for rank, doc in enumerate(bm25):
-        scores[doc] = scores.get(doc, 0) + 1/(k + rank)
+    for rank, doc_id in enumerate(bm25):
+        scores[doc_id] = scores.get(doc_id, 0) + 1 / (k + rank)
 
-    for rank, doc in enumerate(dense):
-        scores[doc] = scores.get(doc, 0) + 1/(k + rank)
+    for rank, doc_id in enumerate(dense):
+        scores[doc_id] = scores.get(doc_id, 0) + 1 / (k + rank)
 
     return sorted(scores, key=scores.get, reverse=True)
